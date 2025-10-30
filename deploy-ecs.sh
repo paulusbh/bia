@@ -12,9 +12,9 @@ set -e  # Para o script em caso de erro
 # Configurações padrão
 DEFAULT_REGION="us-east-1"
 DEFAULT_ECR_REPO="bia"
-DEFAULT_CLUSTER="cluster-bia"
-DEFAULT_SERVICE="service-bia"
-DEFAULT_TASK_FAMILY="task-def-bia"
+DEFAULT_CLUSTER="cluster-bia-alb"
+DEFAULT_SERVICE="service-bia-alb"
+DEFAULT_TASK_FAMILY="task-def-bia-alb"
 
 # Cores para output
 RED='\033[0;31m'
@@ -153,7 +153,7 @@ create_task_definition() {
     local ecr_uri=$3
     local tag=$4
     
-    log_info "Criando nova task definition..."
+    log_info "Criando nova task definition..." >&2
     
     # Obter a task definition atual
     local current_task_def=$(aws ecs describe-task-definition --task-definition $task_family --region $region --query 'taskDefinition' --output json)
@@ -178,17 +178,26 @@ create_task_definition() {
     echo "$new_task_def" > "$new_temp_file"
     
     # Registrar nova task definition
-    local new_revision=$(aws ecs register-task-definition --region $region --cli-input-json file://"$new_temp_file" --query 'taskDefinition.revision' --output text)
+    local register_output=$(aws ecs register-task-definition --region $region --cli-input-json file://"$new_temp_file" 2>&1)
+    local register_exit_code=$?
     
-    # Limpar arquivos temporários
-    rm -f "$temp_file" "$new_temp_file"
-    
-    if [ $? -ne 0 ]; then
+    if [ $register_exit_code -ne 0 ]; then
+        rm -f "$temp_file" "$new_temp_file"
         log_error "Falha ao registrar nova task definition"
         exit 1
     fi
     
-    log_success "Nova task definition criada: $task_family:$new_revision"
+    local new_revision=$(echo "$register_output" | jq -r '.taskDefinition.revision')
+    
+    # Limpar arquivos temporários
+    rm -f "$temp_file" "$new_temp_file"
+    
+    if [ $register_exit_code -ne 0 ]; then
+        log_error "Falha ao registrar nova task definition"
+        exit 1
+    fi
+    
+    log_success "Nova task definition criada: $task_family:$new_revision" >&2
     echo $new_revision
 }
 
